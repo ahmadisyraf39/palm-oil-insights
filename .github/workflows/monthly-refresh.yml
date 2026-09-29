@@ -1,0 +1,26 @@
+name: Monthly data refresh
+
+on:
+  schedule:
+    - cron: "0 2 12 * *"    # 02:00 UTC (10:00 Malaysia time) on the 12th of every month
+  workflow_dispatch:         # adds a "Run workflow" button for manual runs
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Refresh dataset in Azure Blob Storage
+        env:
+          AZURE_CONN_STR: ${{ secrets.AZURE_CONN_STR }}
+        run: python pipeline/refresh_data.py
