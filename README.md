@@ -5,7 +5,7 @@ An end-to-end data project that combines palm oil prices, Malaysian production a
 1. **What drives Malaysian palm oil supply and prices?**
 2. **Can next month's palm oil price be forecast better than a simple baseline?**
 
-Built with Python (pandas, scikit-learn) and Power BI.
+Built with Python (pandas, scikit-learn), Azure Blob Storage, GitHub Actions and Power BI. The dataset refreshes automatically every month.
 
 ![Dashboard overview](dashboard/dashboard_overview.png)
 
@@ -40,20 +40,41 @@ The model predicts **next month's price change** using only information availabl
 
 ---
 
-## Approach
+## Architecture
 
 ```
-World Bank prices ─┐
-MPOB production &  ├─► Clean & merge (pandas) ─► Analysis ─► Forecast models ─► Power BI dashboard
-stocks             │    monthly, 2015–2026        3 business     naive / linear /     2 pages
-Open-Meteo rainfall┘                              questions      random forest
+ Sources                      Azure Blob Storage (palm-oil-data)          Reporting
+ ───────                      ──────────────────────────────────          ─────────
+ World Bank Pink Sheet ──┐
+ MPOB CSV + backfill ────┼──► raw/
+                         │      │
+ Open-Meteo API ─────────┤      ▼
+                         └──► GitHub Actions (12th monthly)
+                                pipeline/refresh_data.py
+                                │  clean · merge · backfill
+                                ▼
+                              processed/palm_oil_monthly.csv ──────────► Power BI
+                                                                         dashboard
+ Colab notebook ───────────► processed/forecast.csv ─────────────────► (2 pages)
+ (analysis + models)
 ```
+
+- **Storage:** Azure Blob Storage with a `raw/` (source files) and `processed/` (analysis-ready) layout.
+- **Automation:** a scheduled GitHub Actions workflow runs `pipeline/refresh_data.py` on the 12th of every month (after MPOB's monthly release), fetches fresh rainfall from Open-Meteo, rebuilds the dataset and writes it back to Blob Storage. It can also be run manually.
+- **Analysis and modelling:** the Colab notebook explores the data, trains the forecast models and uploads `forecast.csv` to Blob Storage.
+- **Reporting:** Power BI reads both files directly from Azure, so a refresh shows the latest month.
+- **Security:** the storage connection string is kept in an encrypted GitHub secret and in Colab Secrets, never in the code.
+
+---
+
+## Approach
 
 1. **Data collection and cleaning:** load the World Bank Pink Sheet, locate the header row programmatically, convert `2015M01`-style dates, aggregate daily rainfall to monthly totals, and reshape MPOB data from long to wide format.
 2. **Data quality:** the MPOB production series had **76 missing months**. These were backfilled from MPOB's official yearly *Summary of the Malaysian Palm Oil Industry* reports (2015–2020), the Ministry of Plantation and Commodities' *Palm Oil Statistics 2023* (2022), and MPOB monthly report figures (2023). The backfill was validated against MPOB's closing stocks (exact match) and official annual production totals (2022 exact; 2023 within 0.01%).
 3. **Analysis:** seasonality by calendar month, lagged correlation between rainfall and production (0–12 months), and stocks vs next month's price.
 4. **Forecasting:** feature engineering using only past information (no data leakage), a time-based train/test split, and comparison of three models by mean absolute error.
 5. **Dashboard:** a two-page Power BI report with DAX measures (latest price, month-on-month change, stocks, forecast error), a year filter, a forecast backtest, and a stocks-vs-price trend line.
+6. **Cloud storage and automation:** processed data is stored in Azure Blob Storage, and a scheduled GitHub Actions workflow refreshes it monthly. Power BI connects directly to the cloud source.
 
 ---
 
@@ -73,6 +94,11 @@ Open-Meteo rainfall┘                              questions      random forest
 palm-oil-insights/
 ├── README.md
 ├── palm_oil_project.ipynb          # data pipeline, analysis and forecasting
+├── .github/workflows/
+│   └── monthly-refresh.yml         # scheduled GitHub Actions workflow (12th of each month)
+├── pipeline/
+│   ├── refresh_data.py             # monthly refresh: raw/ → processed/ in Azure Blob Storage
+│   └── requirements.txt
 ├── data/
 │   ├── CMO-Historical-Data-Monthly.xlsx
 │   ├── mpob_raw.csv
@@ -95,7 +121,14 @@ palm-oil-insights/
 1. Open `palm_oil_project.ipynb` in [Google Colab](https://colab.research.google.com/) (use the **Open in Colab** badge at the top of the notebook).
 2. Upload the files from `data/` to your Google Drive folder, or update the `folder` path in the notebook.
 3. Run all cells (**Runtime → Run all**).
-4. Open `dashboard/palm_oil_dashboard.pbix` in Power BI Desktop (Windows) and refresh the data sources if needed.
+4. Open `dashboard/palm_oil_dashboard.pbix` in Power BI Desktop (Windows). It reads from Azure Blob Storage, so you will need your own storage account and access key, or you can point the queries back to the CSV files in `data/`.
+
+**Automated refresh (GitHub Actions)**
+
+1. Create an Azure storage account with a container named `palm-oil-data`, and upload the source files to `raw/`.
+2. Add the storage connection string as a repository secret named `AZURE_CONN_STR` (**Settings → Secrets and variables → Actions**).
+3. The workflow runs automatically on the 12th of each month, or manually from **Actions → Monthly data refresh → Run workflow**.
+4. Each month, upload the latest World Bank Pink Sheet and MPOB file to `raw/` before the 12th.
 
 ---
 
@@ -108,16 +141,15 @@ palm-oil-insights/
 
 ## Next steps
 
-- Store data in **Azure Blob Storage** and connect Power BI to the cloud source
-- Automate the monthly data refresh with an **Azure Function** (timer trigger)
-- Benchmark against **Azure AutoML**
+- Benchmark the Random Forest against **Azure Machine Learning AutoML** on the same test period
+- Automate the model retraining step, so `forecast.csv` also refreshes monthly
 - Add external drivers such as crude oil and soybean oil prices
 
 ---
 
 ## Tech stack
 
-Python (pandas, scikit-learn, matplotlib) · Google Colab · Power BI (DAX, Power Query) · GitHub
+Python (pandas, scikit-learn, matplotlib) · Google Colab · Azure Blob Storage · GitHub Actions · Power BI (DAX, Power Query) · GitHub
 
 ## Author
 
